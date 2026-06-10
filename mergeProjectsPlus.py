@@ -65,20 +65,102 @@ def merge_into(base, other, logger=log):
             try: base.remove(ac)
             except Exception: pass
 
+def _get_aggregate_parent(f, elem):
+    for rel in f.by_type("IfcRelAggregates"):
+        if elem in (rel.RelatedObjects or ()):
+            return rel.RelatingObject
+    return None
+
+def _merge_duplicate_into(f, keeper, dup, logger=log):
+    # Detach dup from its parent aggregation (keeper already hangs there;
+    # Decomposes is SET [0:1], so dup may not simply be repointed).
+    for rel in f.by_type("IfcRelAggregates"):
+        if dup in (rel.RelatedObjects or ()):
+            remaining = [o for o in rel.RelatedObjects if o != dup]
+            if remaining:
+                rel.RelatedObjects = remaining
+            else:
+                try: f.remove(rel)
+                except Exception: pass
+    # Everything else referencing dup (children aggregations, contained
+    # elements, psets, ...) now points at keeper instead.
+    for inv in f.get_inverse(dup):
+        try: ifcopenshell.util.element.replace_attribute(inv, dup, keeper)
+        except Exception: pass
+    # Keep dup's placement if children still chain through it, so geometry
+    # stays where it was; drop it only when nothing references it anymore.
+    placement = getattr(dup, "ObjectPlacement", None)
+    try: f.remove(dup)
+    except Exception: pass
+    if placement is not None:
+        try:
+            if not f.get_inverse(placement):
+                f.remove(placement)
+        except Exception: pass
+
+def merge_spatial_by_name(f, ifc_class, match_elevation=False, logger=log):
+    """Merge same-named ifc_class elements that share the same parent.
+    With match_elevation, storeys also need (near-)equal Elevation."""
+    groups = {}
+    for e in f.by_type(ifc_class):
+        name = (e.Name or "").strip()
+        if not name:
+            continue  # never merge unnamed elements
+        parent = _get_aggregate_parent(f, e)
+        key = [name, parent.id() if parent is not None else -1]
+        if match_elevation:
+            elev = getattr(e, "Elevation", None)
+            key.append(None if elev is None else round(float(elev), 5))
+        groups.setdefault(tuple(key), []).append(e)
+    merged = 0
+    for group in groups.values():
+        keeper = group[0]
+        for dup in group[1:]:
+            try:
+                _merge_duplicate_into(f, keeper, dup, logger)
+                merged += 1
+            except Exception as e:
+                logger.error("merge %s '%s' failed: %s", ifc_class, keeper.Name, e)
+    if merged:
+        logger.info("merged %d duplicate %s by name", merged, ifc_class)
+    return merged
+
+def apply_spatial_merges(f, merge_sites=False, merge_buildings=False,
+                         merge_storeys=False, storeys_same_elevation=False,
+                         logger=log):
+    # Top-down so children regroup under already-merged parents.
+    if merge_sites:
+        merge_spatial_by_name(f, "IfcSite", logger=logger)
+    if merge_buildings:
+        merge_spatial_by_name(f, "IfcBuilding", logger=logger)
+    if merge_storeys:
+        merge_spatial_by_name(f, "IfcBuildingStorey",
+                              match_elevation=storeys_same_elevation, logger=logger)
+
 def merge_files(base_path, other_paths, output_path,
-                use_incremental=False, keep_temp=True, logger=log):
+                use_incremental=False, keep_temp=True, logger=log,
+                merge_sites=False, merge_buildings=False,
+                merge_storeys=False, storeys_same_elevation=False):
     base = ifcopenshell.open(base_path)
     if not other_paths:
+        apply_spatial_merges(base, merge_sites, merge_buildings,
+                             merge_storeys, storeys_same_elevation, logger)
         base.write(output_path); return base
     if use_incremental:
-        return _merge_incremental(base, other_paths, output_path, keep_temp, logger)
+        return _merge_incremental(base, other_paths, output_path, keep_temp, logger,
+                                  merge_sites, merge_buildings,
+                                  merge_storeys, storeys_same_elevation)
     for p in other_paths:
         try: merge_into(base, ifcopenshell.open(p), logger)
         except Exception as e: logger.error("merge failed %s: %s", p, e)
+    apply_spatial_merges(base, merge_sites, merge_buildings,
+                         merge_storeys, storeys_same_elevation, logger)
     base.write(output_path)
     return base
 
-def _merge_incremental(base, other_paths, output_path, keep_temp, logger):
+def _merge_incremental(base, other_paths, output_path, keep_temp, logger,
+                       merge_sites=False, merge_buildings=False,
+                       merge_storeys=False, storeys_same_elevation=False):
     import shutil
     out_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
     tmp = os.path.join(out_dir, "merge_project_plus_tmp")
@@ -112,6 +194,8 @@ def _merge_incremental(base, other_paths, output_path, keep_temp, logger):
     print()  # newline after the bar completes
 
     final = ifcopenshell.open(step)
+    apply_spatial_merges(final, merge_sites, merge_buildings,
+                         merge_storeys, storeys_same_elevation, logger)
     final.write(output_path)
     if not keep_temp:
         try:
@@ -121,9 +205,12 @@ def _merge_incremental(base, other_paths, output_path, keep_temp, logger):
     return final
 
 class Patcher:
-    """ifcpatch-compatible: args = filepaths, use_incremental, output_path, keep_temp"""
+    """ifcpatch-compatible: args = filepaths, use_incremental, output_path, keep_temp,
+    merge_sites, merge_buildings, merge_storeys, storeys_same_elevation"""
     def __init__(self, file, logger=None, filepaths=(), use_incremental=False,
-                 output_path="", keep_temp=True):
+                 output_path="", keep_temp=True, merge_sites=False,
+                 merge_buildings=False, merge_storeys=False,
+                 storeys_same_elevation=False):
         self.file = file; self.logger = logger or log
         r = []
         if isinstance(filepaths, str):
@@ -136,6 +223,10 @@ class Patcher:
         self.use_incremental = to_bool(use_incremental)
         self.output_path = output_path or ""
         self.keep_temp = to_bool(keep_temp)
+        self.merge_sites = to_bool(merge_sites)
+        self.merge_buildings = to_bool(merge_buildings)
+        self.merge_storeys = to_bool(merge_storeys)
+        self.storeys_same_elevation = to_bool(storeys_same_elevation)
 
     def patch(self):
         if not self.filepaths:
@@ -146,7 +237,9 @@ class Patcher:
             os.makedirs(tmp, exist_ok=True)
             bt = os.path.join(tmp, "tmp_base.ifc"); self.file.write(bt)
             merged = _merge_incremental(ifcopenshell.open(bt), self.filepaths,
-                self.output_path, self.keep_temp, self.logger)
+                self.output_path, self.keep_temp, self.logger,
+                self.merge_sites, self.merge_buildings,
+                self.merge_storeys, self.storeys_same_elevation)
             for e in list(self.file):
                 try: self.file.remove(e)
                 except Exception: pass
@@ -157,3 +250,5 @@ class Patcher:
             for p in self.filepaths:
                 try: merge_into(self.file, ifcopenshell.open(p), self.logger)
                 except Exception as e: self.logger.error("failed %s: %s", p, e)
+            apply_spatial_merges(self.file, self.merge_sites, self.merge_buildings,
+                self.merge_storeys, self.storeys_same_elevation, self.logger)

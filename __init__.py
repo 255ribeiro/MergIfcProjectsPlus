@@ -101,6 +101,26 @@ class MPP_Props(PropertyGroup):
         description="Merge one file at a time, saving each step to a temp folder (safer but slowest)",
         default=False,
     )
+    merge_sites_by_name: BoolProperty(
+        name="Merge sites by name",
+        description="After merging, combine IfcSite elements that share the same name into one",
+        default=False,
+    )
+    merge_buildings_by_name: BoolProperty(
+        name="Merge buildings by name",
+        description="After merging, combine IfcBuilding elements with the same name (under the same site) into one",
+        default=False,
+    )
+    merge_storeys_by_name: BoolProperty(
+        name="Merge storeys by name",
+        description="After merging, combine IfcBuildingStorey elements with the same name (in the same building) into one",
+        default=False,
+    )
+    storeys_same_elevation_only: BoolProperty(
+        name="Only if same height",
+        description="Only merge same-named storeys when their elevation matches",
+        default=True,
+    )
     keep_temp: BoolProperty(
         name="Keep temp folder (debug)",
         default=True,
@@ -239,6 +259,11 @@ class MPP_OT_run(Operator):
                 output_path=output,
                 use_incremental=props.use_incremental,
                 keep_temp=props.keep_temp,
+                merge_sites=props.merge_sites_by_name,
+                merge_buildings=props.merge_buildings_by_name,
+                merge_storeys=props.merge_storeys_by_name,
+                storeys_same_elevation=(props.merge_storeys_by_name
+                                        and props.storeys_same_elevation_only),
             )
         except Exception as e:
             self.report({"ERROR"}, f"Merge failed: {e}")
@@ -299,6 +324,13 @@ def _draw_ui(layout, context):
     layout.prop(props, "use_incremental")
     if props.use_incremental:
         layout.prop(props, "keep_temp")
+    layout.prop(props, "merge_sites_by_name")
+    layout.prop(props, "merge_buildings_by_name")
+    layout.prop(props, "merge_storeys_by_name")
+    if props.merge_storeys_by_name:
+        r = layout.row()
+        r.separator(factor=2.0)
+        r.prop(props, "storeys_same_elevation_only")
     layout.separator()
 
     # output + run
