@@ -11,13 +11,13 @@ in one pass — with an optional step-by-step incremental merge.
 merge_project_plus_addon.zip
 ├── blender_manifest.toml     Extension metadata (Blender 4.2+ format)
 ├── __init__.py               Add-on: UI panel, operators, properties
-├── mergeProjectPlus.py       Engine: merge logic (UI-free, reusable)
+├── mergeProjectsPlus.py       Engine: merge logic (UI-free, reusable)
 └── README.md                 This file
 ```
 
 ## How it works
 
-- `mergeProjectPlus.py` is the **engine** — pure merge logic with no UI.
+- `mergeProjectsPlus.py` is the **engine** — pure merge logic with no UI.
   It exposes `merge_files()` (called by the add-on) and an ifcpatch-compatible
   `Patcher` class (for future use as a native recipe).
 - `__init__.py` is the **add-on** — it loads the engine from the same folder
@@ -66,7 +66,7 @@ A live progress bar prints to the system console (Window → Toggle System
 Console) as each file merges:
 
 ```
-[MergeProjectPlus] |████████████------------------| 2/5 ( 40.0%) mep_hvac.ifc
+[MergeProjectsPlus] |████████████------------------| 2/5 ( 40.0%) mep_hvac.ifc
 ```
 
 Untick **Keep temp folder** to auto-delete the temp files when done.
@@ -82,6 +82,6 @@ Untick **Keep temp folder** to auto-delete the temp files when done.
 ## Roadmap
 
 The engine's `Patcher` class is already ifcpatch-compatible, so
-`mergeProjectPlus.py` can later be dropped into the ifcpatch `recipes/` folder
+`mergeProjectsPlus.py` can later be dropped into the ifcpatch `recipes/` folder
 to become a native recipe — with a view to contributing upstream to
 IfcOpenShell / Bonsai.

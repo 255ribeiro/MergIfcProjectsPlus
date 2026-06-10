@@ -1,12 +1,22 @@
 schema_version = "1.0.0"
 
 id = "merge_project_plus"
-version = "2.0.0"
+version = "0.1.2"
 name = "BIM: Merge Project Plus"
-tagline = "Merge linked + manual IFC files into one (superset of MergeProjects)"
-maintainer = "Custom"
+tagline = "Requires Bonsai (BIM) · Merge linked + manual IFC files into one"
+maintainer = "Fernando Ferraz Ribeiro <ffribeiro@gmail.com>"
 type = "add-on"
+tags = ["Import-Export", "Scene"]
+website = "https://github.com/ffribeiro/MergIfcProjectsPlus"
 
 blender_version_min = "4.2.0"
 
 license = ["SPDX:GPL-2.0-or-later"]
+
+[build]
+paths_exclude_pattern = [
+  ".git/",
+  "__pycache__/",
+  "*.png",
+  "*.zip",
+]

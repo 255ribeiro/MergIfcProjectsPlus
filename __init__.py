@@ -24,8 +24,8 @@ from bpy.types import PropertyGroup, Operator, Panel
 # ─────────────────────────────────────────────────────────────
 def _load_engine():
     here = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(here, "mergeProjectPlus.py")
-    spec = importlib.util.spec_from_file_location("mergeProjectPlus", path)
+    path = os.path.join(here, "mergeProjectsPlus.py")
+    spec = importlib.util.spec_from_file_location("mergeProjectsPlus", path)
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
     return mod
@@ -34,7 +34,7 @@ try:
     engine = _load_engine()
 except Exception as e:
     engine = None
-    print(f"[MergeProjectPlus] Could not load engine: {e}")
+    print(f"[MergeProjectsPlus] Could not load engine: {e}")
 
 
 # ─────────────────────────────────────────────────────────────
@@ -59,7 +59,7 @@ def _get_linked_paths(context):
                 out.append(p.strip())
         return out
     except Exception as e:
-        print(f"[MergeProjectPlus] links read failed: {e}")
+        print(f"[MergeProjectsPlus] links read failed: {e}")
         return []
 
 
@@ -193,7 +193,7 @@ class MPP_OT_remove_manual(Operator):
 class MPP_OT_run(Operator):
     bl_idname = "mpp.run"
     bl_label = "Merge IFC Files"
-    bl_description = "Run MergeProjectPlus with the current settings"
+    bl_description = "Run MergeProjectsPlus with the current settings"
 
     def execute(self, context):
         if engine is None:
@@ -328,7 +328,12 @@ class MPP_PT_panel(Panel):
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
     bl_context = "scene"
+    bl_parent_id = "BIM_PT_patch"
     bl_options = {"DEFAULT_CLOSED"}
+
+    @classmethod
+    def poll(cls, _context):
+        return _bonsai_available()
 
     def draw(self, context):
         if not _bonsai_available():

@@ -1,5 +1,5 @@
 """
-mergeProjectPlus.py — MergeProjectPlus recipe engine (UI-free).
+mergeProjectsPlus.py — MergeProjectsPlus recipe engine (UI-free).
 Superset of ifcpatch MergeProjects: merges N files, converts units,
 dedups geometric contexts, optional incremental merge via temp folder.
 Drop into ifcpatch/recipes/ later to become a native recipe.
@@ -94,7 +94,7 @@ def _merge_incremental(base, other_paths, output_path, keep_temp, logger):
         bar = "█" * filled + "-" * (bar_len - filled)
         pct = (done / total * 100) if total else 100
         # \r returns to line start so the bar updates in place
-        print(f"\r[MergeProjectPlus] |{bar}| {done}/{total} ({pct:5.1f}%) {label[:30]:<30}",
+        print(f"\r[MergeProjectsPlus] |{bar}| {done}/{total} ({pct:5.1f}%) {label[:30]:<30}",
               end="", flush=True)
 
     _progress(0, total, "starting")
@@ -139,7 +139,7 @@ class Patcher:
 
     def patch(self):
         if not self.filepaths:
-            self.logger.warning("MergeProjectPlus: nothing to merge"); return
+            self.logger.warning("MergeProjectsPlus: nothing to merge"); return
         if self.use_incremental and self.output_path:
             out_dir = os.path.dirname(os.path.abspath(self.output_path)) or os.getcwd()
             tmp = os.path.join(out_dir, "merge_project_plus_tmp")

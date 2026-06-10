@@ -1,0 +1,30 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build extension zip
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ZIP="merge_project_plus-${VERSION}.zip"
+          zip "$ZIP" __init__.py mergeProjectsPlus.py blender_manifest.toml README.md
+          echo "ZIP=$ZIP" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" "$ZIP" \
+            --title "Release $GITHUB_REF_NAME" \
+            --generate-notes
