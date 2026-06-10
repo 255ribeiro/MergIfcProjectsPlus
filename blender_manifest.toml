@@ -1,0 +1,12 @@
+schema_version = "1.0.0"
+
+id = "merge_project_plus"
+version = "2.0.0"
+name = "BIM: Merge Project Plus"
+tagline = "Merge linked + manual IFC files into one (superset of MergeProjects)"
+maintainer = "Custom"
+type = "add-on"
+
+blender_version_min = "4.2.0"
+
+license = ["SPDX:GPL-2.0-or-later"]
