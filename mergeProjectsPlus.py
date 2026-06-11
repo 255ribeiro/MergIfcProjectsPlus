@@ -162,30 +162,108 @@ def apply_spatial_merges(f, merge_sites=False, merge_buildings=False,
         merge_spatial_by_name(f, "IfcBuildingStorey",
                               match_elevation=storeys_same_elevation, logger=logger)
 
+def _qto_rule_for_schema(rule, schema):
+    """Normalize a rule id to the file's schema, keeping the ...Blender suffix."""
+    is_x3 = schema.startswith("IFC4X3")
+    if is_x3 and rule.startswith("IFC4Qto"):
+        return rule.replace("IFC4Qto", "IFC4X3Qto", 1)
+    if not is_x3 and rule.startswith("IFC4X3Qto"):
+        return rule.replace("IFC4X3Qto", "IFC4Qto", 1)
+    return rule
+
+def _apply_takeoff(f, op, logger=log):
+    """Same flow as Bonsai's bim.perform_quantity_take_off, scoped by
+    selector queries instead of the viewport selection."""
+    import ifc5d.qto
+    import ifcopenshell.util.selector
+    queries = [q for q in op.get("queries", []) if q]
+    if queries:
+        elements = set()
+        for q in queries:
+            try:
+                elements |= ifcopenshell.util.selector.filter_elements(f, q)
+            except Exception as e:
+                logger.error("takeoff query failed %r: %s", q, e)
+    else:
+        elements = set(f.by_type("IfcElement"))
+    if not elements:
+        logger.info("takeoff: no elements matched, skipping")
+        return
+    rule = _qto_rule_for_schema(op.get("rule") or "IFC4QtoBaseQuantities", f.schema)
+    if rule not in ifc5d.qto.rules:
+        rule = _qto_rule_for_schema("IFC4QtoBaseQuantities", f.schema)
+    results = ifc5d.qto.quantify(f, elements, ifc5d.qto.rules[rule])
+    ifc5d.qto.edit_qtos(f, results)
+    not_quantified = elements - set(results.keys())
+    if op.get("fallback") and not_quantified:
+        is_x3 = f.schema.startswith("IFC4X3")
+        alternative = next(
+            (r for r in ifc5d.qto.rules
+             if r.startswith("IFC4X3") == is_x3 and r != rule), None)
+        if alternative:
+            results = ifc5d.qto.quantify(f, not_quantified, ifc5d.qto.rules[alternative])
+            ifc5d.qto.edit_qtos(f, results)
+            not_quantified -= set(results.keys())
+    logger.info("takeoff: quantified %d element(s), %d not quantified",
+                len(elements) - len(not_quantified), len(not_quantified))
+
+def apply_operations(f, ops, logger=log):
+    """Run a list of pipeline operations against an ifcopenshell file.
+    ops: [{"type": "recipe", "name": str, "arguments": list},
+          {"type": "takeoff", "queries": [str], "rule": str, "fallback": bool}]
+    Returns the (possibly replaced) file: recipes may return a new model."""
+    for op in ops or []:
+        kind = op.get("type")
+        try:
+            if kind == "recipe":
+                import ifcpatch
+                out = ifcpatch.execute({"input": "", "file": f,
+                                        "recipe": op["name"],
+                                        "arguments": op.get("arguments", [])})
+                if isinstance(out, ifcopenshell.file):
+                    f = out
+            elif kind == "takeoff":
+                _apply_takeoff(f, op, logger)
+            else:
+                logger.warning("unknown operation type: %r", kind)
+        except Exception as e:
+            logger.error("operation %s failed: %s", op.get("name", kind), e)
+    return f
+
 def merge_files(base_path, other_paths, output_path,
                 use_incremental=False, keep_temp=True, logger=log,
                 merge_sites=False, merge_buildings=False,
-                merge_storeys=False, storeys_same_elevation=False):
+                merge_storeys=False, storeys_same_elevation=False,
+                pre_ops=None, post_ops=None):
+    pre_ops = pre_ops or {}
     base = ifcopenshell.open(base_path)
+    base = apply_operations(base, pre_ops.get(base_path), logger)
     if not other_paths:
         apply_spatial_merges(base, merge_sites, merge_buildings,
                              merge_storeys, storeys_same_elevation, logger)
+        base = apply_operations(base, post_ops, logger)
         base.write(output_path); return base
     if use_incremental:
         return _merge_incremental(base, other_paths, output_path, keep_temp, logger,
                                   merge_sites, merge_buildings,
-                                  merge_storeys, storeys_same_elevation)
+                                  merge_storeys, storeys_same_elevation,
+                                  pre_ops, post_ops)
     for p in other_paths:
-        try: merge_into(base, ifcopenshell.open(p), logger)
+        try:
+            other = apply_operations(ifcopenshell.open(p), pre_ops.get(p), logger)
+            merge_into(base, other, logger)
         except Exception as e: logger.error("merge failed %s: %s", p, e)
     apply_spatial_merges(base, merge_sites, merge_buildings,
                          merge_storeys, storeys_same_elevation, logger)
+    base = apply_operations(base, post_ops, logger)
     base.write(output_path)
     return base
 
 def _merge_incremental(base, other_paths, output_path, keep_temp, logger,
                        merge_sites=False, merge_buildings=False,
-                       merge_storeys=False, storeys_same_elevation=False):
+                       merge_storeys=False, storeys_same_elevation=False,
+                       pre_ops=None, post_ops=None):
+    pre_ops = pre_ops or {}
     import shutil
     out_dir = os.path.dirname(os.path.abspath(output_path)) or os.getcwd()
     tmp = os.path.join(out_dir, "merge_project_plus_tmp")
@@ -209,7 +287,8 @@ def _merge_incremental(base, other_paths, output_path, keep_temp, logger,
         nxt = os.path.join(tmp, f"tmp_step_{i:03d}.ifc")
         try:
             bm = ifcopenshell.open(step)
-            merge_into(bm, ifcopenshell.open(p), logger)
+            other = apply_operations(ifcopenshell.open(p), pre_ops.get(p), logger)
+            merge_into(bm, other, logger)
             bm.write(nxt)
             step = nxt
         except Exception as e:
@@ -221,6 +300,7 @@ def _merge_incremental(base, other_paths, output_path, keep_temp, logger,
     final = ifcopenshell.open(step)
     apply_spatial_merges(final, merge_sites, merge_buildings,
                          merge_storeys, storeys_same_elevation, logger)
+    final = apply_operations(final, post_ops, logger)
     final.write(output_path)
     if not keep_temp:
         try:

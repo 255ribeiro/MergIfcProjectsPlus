@@ -120,6 +120,45 @@ def run_case_mixed_units():
     print(f"OK mixed-unit merge: metres converted to mm ({xs})")
 
 
+def run_case_pre_post_ops():
+    """Pipeline: pre-op recipe converts the metres file to mm before merging;
+    post-op recipe converts the merged result to metres."""
+    tmp = tempfile.mkdtemp()
+    a, b, out = (os.path.join(tmp, n) for n in ("a.ifc", "b.ifc", "out.ifc"))
+    make_unit_file("Site A", 5000.0, "MILLIMETERS").write(a)
+    make_unit_file("Site B", 7.0, "METERS").write(b)
+    pre_ops = {b: [{"type": "recipe", "name": "ConvertLengthUnit",
+                    "arguments": ["MILLIMETRE"]}]}
+    post_ops = [{"type": "recipe", "name": "ConvertLengthUnit",
+                 "arguments": ["METRE"]}]
+    engine.merge_files(a, [b], out, pre_ops=pre_ops, post_ops=post_ops)
+    m = ifcopenshell.open(out)
+    xs = site_positions(m)
+    assert engine.get_length_unit_name(m) == "METRE", engine.get_length_unit_name(m)
+    assert abs(xs["Site A"] - 5.0) < 1e-6, xs
+    assert abs(xs["Site B"] - 7.0) < 1e-6, xs
+    print(f"OK pre/post recipe ops: pre-converted to mm, post-converted to m ({xs})")
+
+
+def run_case_takeoff_op():
+    """Takeoff op smoke tests: rule-id schema normalization plus a no-match
+    query (skips quantify) and an op on elements without geometry."""
+    assert engine._qto_rule_for_schema("IFC4QtoBaseQuantities", "IFC4X3_ADD2") \
+        == "IFC4X3QtoBaseQuantities"
+    assert engine._qto_rule_for_schema("IFC4X3QtoBaseQuantitiesBlender", "IFC4") \
+        == "IFC4QtoBaseQuantitiesBlender"
+    tmp = tempfile.mkdtemp()
+    a, b, out = (os.path.join(tmp, n) for n in ("a.ifc", "b.ifc", "out.ifc"))
+    make_unit_file("Site A", 0.0, "MILLIMETERS").write(a)
+    make_unit_file("Site B", 0.0, "MILLIMETERS").write(b)
+    post_ops = [{"type": "takeoff", "queries": ["IfcWall"],
+                 "rule": "IFC4QtoBaseQuantities", "fallback": True}]
+    engine.merge_files(a, [b], out, post_ops=post_ops)  # no walls -> no-op
+    m = ifcopenshell.open(out)
+    assert len(m.by_type("IfcSite")) == 2
+    print("OK takeoff op: schema normalization + empty-match query is a no-op")
+
+
 if __name__ == "__main__":
     # With elevation check: L1+L1 merge (same elev), L2s stay apart -> 3 storeys
     run_case(storeys_same_elevation=True, expect_storeys=3)
@@ -128,4 +167,6 @@ if __name__ == "__main__":
     run_case_no_merge()
     run_case_mm_safe()
     run_case_mixed_units()
+    run_case_pre_post_ops()
+    run_case_takeoff_op()
     print("All tests passed.")
