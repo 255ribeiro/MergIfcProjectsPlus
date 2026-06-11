@@ -7,14 +7,19 @@ Drop into ifcpatch/recipes/ later to become a native recipe.
 from __future__ import annotations
 import json, logging, os
 from typing import Sequence, Union
-import ifcopenshell, ifcopenshell.util.element
+import ifcopenshell, ifcopenshell.util.element, ifcopenshell.util.unit
 
 log = logging.getLogger(__name__)
 
-def to_bool(v): 
+def to_bool(v):
     return v if isinstance(v, bool) else str(v).strip().lower() in ("true","1","yes","on")
 
 def get_length_unit_name(f):
+    try:
+        unit = ifcopenshell.util.unit.get_project_unit(f, "LENGTHUNIT")
+        if unit is not None:
+            return ifcopenshell.util.unit.get_full_unit_name(unit)
+    except Exception: pass
     try:
         for u in f.by_type("IfcSIUnit"):
             if u.UnitType == "LENGTHUNIT":
@@ -22,48 +27,68 @@ def get_length_unit_name(f):
     except Exception: pass
     return "METRE"
 
-def get_equivalent_context(base, other_ctx):
-    try:
-        t, i, v = other_ctx.ContextType, other_ctx.ContextIdentifier, other_ctx.TargetView
-    except Exception: return None
-    for e in base.by_type("IfcGeometricRepresentationContext"):
-        if (getattr(e,"ContextType",None)==t and getattr(e,"ContextIdentifier",None)==i
-                and getattr(e,"TargetView",None)==v):
-            return e
+def get_equivalent_context(existing_contexts, added_ctx):
+    """Same matching rules as ifcpatch MergeProjects: subcontexts also
+    compare TargetView, plain contexts only type + identifier."""
+    for ctx in existing_contexts:
+        if ctx.is_a() != added_ctx.is_a():
+            continue
+        if ctx.is_a("IfcGeometricRepresentationSubContext"):
+            if (ctx.ContextType == added_ctx.ContextType
+                    and ctx.ContextIdentifier == added_ctx.ContextIdentifier
+                    and ctx.TargetView == added_ctx.TargetView):
+                return ctx
+        elif (ctx.ContextType == added_ctx.ContextType
+                and ctx.ContextIdentifier == added_ctx.ContextIdentifier):
+            return ctx
     return None
 
 def merge_into(base, other, logger=log):
+    """MergeProjects-style merge without its geolocation alignment, which
+    mixes project and map units (a 1000x error on millimetre models) when
+    the files' georeferencing differs."""
     bu, ou = get_length_unit_name(base), get_length_unit_name(other)
     if bu != ou:
         try:
-            import ifcpatch
-            other = ifcpatch.execute({"input":"in.ifc","file":other,
-                "recipe":"ConvertLengthUnit","arguments":[bu]})
+            other = ifcopenshell.util.unit.convert_file_length_units(other, bu)
         except Exception as e:
             logger.warning("unit convert failed: %s", e)
+
+    existing_contexts = base.by_type("IfcGeometricRepresentationContext")
+    added_contexts = set()
+
     bp = base.by_type("IfcProject")[0]
     ops = other.by_type("IfcProject")
-    op = ops[0] if ops else None
-    added = {}
-    for ent in other:
-        if op is not None and ent == op: continue
-        try: added[ent.id()] = base.add(ent)
-        except Exception: pass
-    if op is not None:
-        for rel in other.by_type("IfcRelAggregates"):
-            if rel.RelatingObject == op and rel.id() in added:
-                try: added[rel.id()].RelatingObject = bp
-                except Exception: pass
+    merged_project = base.add(ops[0]) if ops else None
+
     for ent in other.by_type("IfcGeometricRepresentationContext"):
-        if ent.id() not in added: continue
-        ac = added[ent.id()]
-        ex = get_equivalent_context(base, ent)
-        if ex and ex != ac:
-            for inv in base.get_inverse(ac):
-                try: ifcopenshell.util.element.replace_attribute(inv, ac, ex)
-                except Exception: pass
-            try: base.remove(ac)
+        added_contexts.add(base.add(ent))
+    for ent in other:
+        try: base.add(ent)
+        except Exception: pass
+
+    if merged_project is not None:
+        for inv in base.get_inverse(merged_project):
+            try: ifcopenshell.util.element.replace_attribute(inv, merged_project, bp)
             except Exception: pass
+        try: base.remove(merged_project)
+        except Exception: pass
+
+    to_delete = set()
+    for ac in added_contexts:
+        ex = get_equivalent_context(existing_contexts, ac)
+        if not ex or ex == ac:
+            continue
+        for inv in base.get_inverse(ac):
+            if base.schema != "IFC2X3" and inv.is_a("IfcCoordinateOperation"):
+                to_delete.add(inv.id())
+                continue
+            try: ifcopenshell.util.element.replace_attribute(inv, ac, ex)
+            except Exception: pass
+        to_delete.add(ac.id())
+    for eid in to_delete:
+        try: ifcopenshell.util.element.remove_deep2(base, base.by_id(eid))
+        except Exception: pass
 
 def _get_aggregate_parent(f, elem):
     for rel in f.by_type("IfcRelAggregates"):

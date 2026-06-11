@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
-id = "merge_projects_plus"
-version = "0.1.5"
-name = "BIM: Merge Projects Plus"
-tagline = "Requires Bonsai (BIM) · Merge linked + manual IFC files into one"
+id = "merge_projects_plus_recipe"
+version = "1.0.0"
+name = "BIM: MergeProjectsPlus Recipe Installer"
+tagline = "Requires Bonsai (BIM) · Installs the MergeProjectsPlus ifcpatch recipe"
 maintainer = "Fernando Ferraz Ribeiro <ffribeiro@gmail.com>"
 type = "add-on"
 tags = ["Import-Export", "Scene"]

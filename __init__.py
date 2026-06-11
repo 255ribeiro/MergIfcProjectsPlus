@@ -2,9 +2,9 @@
 bl_info = {
     "name": "BIM: Merge Project Plus",
     "author": "Custom",
-    "version": (2, 0, 0),
+    "version": (2, 1, 0),
     "blender": (4, 2, 0),
-    "location": "Scene Properties → Quality and Control → IFC Patch area",
+    "location": "Scene Properties → Quality and Control → Merge Project Plus",
     "description": "Merge linked + manually-added IFC files into one output.",
     "category": "BIM",
 }
@@ -359,8 +359,12 @@ class MPP_PT_panel(Panel):
     bl_idname = "MPP_PT_panel"
     bl_space_type = "PROPERTIES"
     bl_region_type = "WINDOW"
-    bl_context = "scene"
-    bl_parent_id = "BIM_PT_patch"
+    # No bl_context on purpose: placement comes from the parent panel, and
+    # declaring "scene" would make Bonsai's load_post scene-panel hijack
+    # pick this panel up, crash its parents-first sort (our parent is a
+    # Bonsai panel it excludes), and abort the hiding of default Blender
+    # scene panels — which then randomly reappear.
+    bl_parent_id = "BIM_PT_tab_quality_control"
     bl_options = {"DEFAULT_CLOSED"}
 
     @classmethod
